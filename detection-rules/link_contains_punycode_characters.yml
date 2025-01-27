@@ -9,22 +9,35 @@ authors:
 severity: "medium"
 source: |
   type.inbound
-  and any(body.links, .href_url.domain.punycode is not null) 
+  and any(body.links, .href_url.domain.punycode is not null and .href_url.domain.valid == true)
   and (
-    // include automated emails
-    sender.display_name == "WordPress"
-    or sender.email.local_part == "wordpress"
-
-    // Has my organization ever sent an email to this sender?
-    or (
-        sender.email.domain.root_domain in $free_email_providers
-        and sender.email.email not in $recipient_emails
+    (
+      // include automated emails
+      sender.display_name == "WordPress"
+      or sender.email.local_part == "wordpress"
     )
+
     or (
-        sender.email.domain.root_domain not in $free_email_providers
-        and sender.email.domain.domain not in $recipient_domains
+      (
+        profile.by_sender().prevalence in ("new", "outlier")
+        and not profile.by_sender().solicited
+      )
+      or (
+        profile.by_sender().any_messages_malicious_or_spam
+        and not profile.by_sender().any_false_positives
+      )
     )
   )
+  and not profile.by_sender().any_false_positives
 tags:
-  - "Suspicious content"
+  - "Attack surface reduction"
+attack_types:
+  - "Credential Phishing"
+tactics_and_techniques:
+  - "Evasion"
+  - "Lookalike domain"
+  - "Punycode"
+detection_methods:
+  - "Sender analysis"
+  - "URL analysis"
 id: "74b3698c-d75e-52db-9596-48af93817822"

@@ -3,34 +3,57 @@ description: |
   This rule detects messages impersonating employees, from unsolicited senders attempting to reroute payroll
   or alter payment details.
 type: "rule"
-severity: "medium"
+severity: "high"
 source: |
-  type.inbound 
-  and sender.display_name in $org_display_names
-  and length(attachments) == 0 
-  and length(body.plain.raw) < 300
-  and (
-      sender.email.domain.root_domain not in $org_domains
-      or
-      sender.email.domain.root_domain in $free_email_providers
-  )
+  type.inbound
   
+  // ensure the display name contains a space to avoid single named process accounts eg. 'billing, payment'
+  and strings.contains(sender.display_name, " ")
+  and sender.display_name in~ $org_display_names
+  and length(attachments) == 0
+  and length(body.links) < 10
+  and length(body.current_thread.text) < 800
+  and (
+    sender.email.domain.root_domain not in $org_domains
+    or sender.email.domain.root_domain in $free_email_providers
+  )
   and 1 of (
-         regex.icontains(body.plain.raw, '(pay\s?(roll|check|date|day)|direct deposit|\bdd\b|gehalt|salario|salary)'),
-         regex.icontains(body.html.inner_text, '(pay\s?(roll|check|date|day)|direct deposit|\bdd\b|gehalt|salario|salary)'),
-         regex.icontains(subject.subject, '(pay\s?(roll|check|date|day)|direct deposit|\bdd\b|gehalt|salario|salary)') 
+    regex.icontains(body.current_thread.text,
+                    '(pay\s?(roll|check|date|day)|direct deposit|(acct|account) rephrase|paid.{0,50}problems|\bACH\b|\bdd\b|gehalt|salario|salary)'
+    ),
+    regex.icontains(subject.subject,
+                    '(pay\s?(roll|check|date|day)|direct deposit|(acct|account) rephrase|paid.{0,50}problems|\bACH\b|\bdd\b|gehalt|salario|salary)'
+    )
   )
   and (
-        (
-            sender.email.domain.root_domain in $free_email_providers
-            and sender.email.email not in $recipient_emails
-        )
-        or (
-            sender.email.domain.root_domain not in $free_email_providers
-            and sender.email.domain.domain not in $recipient_domains
-        )
+    not profile.by_sender_email().solicited
+    or (
+      profile.by_sender().any_messages_malicious_or_spam
+      and not profile.by_sender().any_false_positives
+    )
   )
-tags: 
-  - "Payroll fraud"
-  - "Employee impersonation"
+  and not profile.by_sender().any_false_positives
+  
+  // negate highly trusted sender domains unless they fail DMARC authentication
+  and (
+    (
+      sender.email.domain.root_domain in $high_trust_sender_root_domains
+      and (
+        any(distinct(headers.hops, .authentication_results.dmarc is not null),
+            strings.ilike(.authentication_results.dmarc, "*fail")
+        )
+      )
+    )
+    or sender.email.domain.root_domain not in $high_trust_sender_root_domains
+  )
+
+attack_types:
+  - "BEC/Fraud"
+tactics_and_techniques:
+  - "Impersonation: Employee"
+  - "Free email provider"
+  - "Social engineering"
+detection_methods:
+  - "Content analysis"
+  - "Sender analysis"
 id: "2beb7d85-dfe3-5ecc-9b2a-d7416a3ef992"

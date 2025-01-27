@@ -1,4 +1,0 @@
-'name': "Link: Freenom TLD Unique Count"
-'type': "query"
-'source': |
-  length(distinct(body.links, .href_url.domain.tld in ("tk", "ml", "ga", "cf", "gq")))

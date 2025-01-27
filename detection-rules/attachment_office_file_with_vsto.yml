@@ -9,13 +9,62 @@ authors:
   - twitter: "vector_sec"
 source: |
   type.inbound
-  and any(attachments, (.file_extension in~ $file_extensions_macros or .file_extension in~ $file_extensions_common_archives)
-      and any(file.explode(.),
-          .file_extension in~ ("doc","docm","docx","dot","dotm","xls","xlsx","xlsm","xlm","xlsb","xlt","xltm","ppt","pptx","pptm","ppsm")
-          and any(.scan.exiftool.fields, .key == "Tag_AssemblyLocation"
-          and strings.ilike(.value, "*.vsto*"))
-      )
+  and any(attachments,
+          (
+            .file_extension in~ $file_extensions_macros
+            or .file_extension in~ $file_extensions_common_archives
+            or (
+                .file_extension is null
+                and .file_type == "unknown"
+                and .content_type == "application/octet-stream"
+                and .size < 100000000
+              )
+          )
+          and any(file.explode(.),
+                  .file_extension in~ (
+                    "doc",
+                    "docm",
+                    "docx",
+                    "dot",
+                    "dotm",
+                    "xls",
+                    "xlsx",
+                    "xlsm",
+                    "xlm",
+                    "xlsb",
+                    "xlt",
+                    "xltm",
+                    "ppt",
+                    "pptx",
+                    "pptm",
+                    "ppsm"
+                  )
+                  and any(.scan.exiftool.fields,
+                          .key == "Tag_AssemblyLocation" and strings.ilike(.value, "*.vsto*")
+                          and not strings.ilike(.value, 'C:\Program Files*')
+                          and not any($org_domains, strings.contains(..value, .))
+                  )
+          )
   )
-tags:
-  - "Suspicious attachment"
+  // the message is unsolicited and no false positives
+  and (
+    not profile.by_sender().solicited
+    or (
+      length(headers.reply_to) > 0
+      and all(headers.reply_to, .email.email not in $recipient_emails)
+    )
+  )
+  and not profile.by_sender().any_false_positives
+
+attack_types:
+  - "Malware/Ransomware"
+tactics_and_techniques:
+  - "Scripting"
+detection_methods:
+  - "Archive analysis"
+  - "Content analysis"
+  - "Exif analysis"
+  - "File analysis"
+  - "Sender analysis"
+  - "URL analysis"
 id: "27afa730-6dd5-58ec-9deb-ed5170de210d"

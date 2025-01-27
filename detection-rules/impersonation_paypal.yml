@@ -1,4 +1,4 @@
-name: "Brand impersonation: PayPal"
+name: "Brand Impersonation: PayPal"
 description: |
   Impersonation of PayPal.
 references:
@@ -8,62 +8,108 @@ severity: "medium"
 source: |
   type.inbound
   and (
-      sender.display_name =~ "paypal"
-      or strings.ilevenshtein(sender.display_name, 'paypal') <= 1
-      or strings.ilike(sender.email.domain.domain, '*paypal*')
-
-      or any(attachments, .file_type in ("pdf", "jpg", "jpeg", "png")
-          and any(ml.logo_detect(.).brands, .name == "PayPal")
-          and any(file.explode(.),
-              any(.scan.strings.strings, strings.ilike(., "*PayPal*"))
-              and any(.scan.strings.strings,
-                  strings.ilike(.,
-                      "*invoice*",
-                      "*transaction*",
-                      "*bitcoin*",
-                      "*dear customer*",
-                  )
-              )
-          )
+    strings.replace_confusables(sender.display_name) =~ "paypal"
+    or strings.ilevenshtein(strings.replace_confusables(sender.display_name), 'paypal') <= 1
+    or strings.ilike(strings.replace_confusables(sender.display_name), '*paypal*')
+    or any(attachments,
+           (.file_type in $file_types_images or .file_type == "pdf")
+           and any(ml.logo_detect(.).brands, .name == "PayPal")
+           and any(file.explode(.),
+                   // exclude images taken with mobile cameras and screenshots from android
+                   not any(.scan.exiftool.fields,
+                           .key == "Model"
+                           or (
+                             .key == "Software"
+                             and strings.starts_with(.value, "Android")
+                           )
+                   )
+                   // exclude images taken with mobile cameras and screenshots from Apple
+                   and not any(.scan.exiftool.fields,
+                               .key == "DeviceManufacturer"
+                               and .value == "Apple Computer Inc."
+                   )
+                   and strings.ilike(.scan.ocr.raw, "*PayPal*")
+                   and strings.ilike(.scan.ocr.raw,
+                                     "*invoice*",
+                                     "*transaction*",
+                                     "*bitcoin*",
+                                     "*dear customer*",
+                                     "*suspicious activity*"
+                   )
+           )
+    )
+    or (
+      any(ml.logo_detect(beta.message_screenshot()).brands, .name == "PayPal")
+      and strings.ilike(body.current_thread.text, "*PayPal*")
+      and strings.ilike(body.current_thread.text,
+                        "*invoice*",
+                        "*transaction*",
+                        "*bitcoin*",
+                        "*dear customer*",
+                        "*suspicious activity*"
       )
+    )
   )
-
-  and sender.email.domain.root_domain not in~ (
-      'paypal.com',
-      'paypal.ch',
-      'paypal.nl',
-      'paypal.co.uk',
-      'google.com',
-      'q4inc.com',
-      'paypal.com.au',
-      'paypal.se',
-      'paypal.be',
-      'paypal.de',
-      'paypal.dk',
-      'paypal.pl',
-      'paypal.es',
-      'paypal.ca',
-      'paypal.fr',
-      'paypal.it',
-      'synchronyfinancial.com',
-      'synchronybank.com',
-      'xoom.com',
-      'paypal-experience.com',
-      'paypalcorp.com'
+  and sender.email.domain.root_domain not in (
+    'google.com',
+    'paypal-creditsurvey.com',
+    'paypal-customerfeedback.com',
+    'paypal-experience.com',
+    'paypal-prepaid.com',
+    'paypal.at',
+    'paypal.be',
+    'paypal.ca',
+    'paypal.ch',
+    'paypal.co.br',
+    'paypal.co.il',
+    'paypal.co.uk',
+    'paypal.com',
+    'paypal.com.au',
+    'paypal.com.mx',
+    'paypal.com.sg',
+    'paypal.de',
+    'paypal.dk',
+    'paypal.es',
+    'paypal.fr',
+    'paypal.hk',
+    'paypal.it',
+    'paypal.nl',
+    'paypal.pl',
+    'paypal.se',
+    'paypalcorp.com',
+    'q4inc.com',
+    'synchronybank.com',
+    'synchronyfinancial.com',
+    'xoom.com',
+    'zettle.com'
   )
-
-  // unsolicited
   and (
-          (
-              sender.email.domain.root_domain in $free_email_providers
-              and sender.email.email not in $recipient_emails
-          )
-          or (
-              sender.email.domain.root_domain not in $free_email_providers
-              and sender.email.domain.domain not in $recipient_domains
-          )
+    not profile.by_sender().solicited
+    or (
+      profile.by_sender().any_messages_malicious_or_spam
+      and not profile.by_sender().any_false_positives
+    )
   )
-tags:
-  - "Brand impersonation"
-  - "Suspicious sender"
+  
+  // negate highly trusted sender domains unless they fail DMARC authentication
+  and (
+    (
+      sender.email.domain.root_domain in $high_trust_sender_root_domains
+      and not headers.auth_summary.dmarc.pass
+    )
+    or sender.email.domain.root_domain not in $high_trust_sender_root_domains
+  )
+
+attack_types:
+  - "Credential Phishing"
+tactics_and_techniques:
+  - "Impersonation: Brand"
+  - "Lookalike domain"
+  - "Social engineering"
+detection_methods:
+  - "Computer Vision"
+  - "Content analysis"
+  - "File analysis"
+  - "Header analysis"
+  - "Sender analysis"
 id: "a6b2ceee-ea57-594d-8437-698fad55c9bf"

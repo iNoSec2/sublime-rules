@@ -7,41 +7,47 @@ references:
   - "https://twitter.com/pr0xylife/status/1598016053787123713"
 severity: "high"
 source: |
-  type.inbound and 
-  any(body.links,
-      // This isn't a Google Drive link
-      .href_url.domain.root_domain != "google.com" and 
-      
-      // There are files downloaded
-      length(beta.linkanalysis(.).files_downloaded) > 0 and 
-      
-      // Google Drive branding
-      beta.linkanalysis(.).credphish.brand.name == "GoogleDrive" and 
-      beta.linkanalysis(.).credphish.brand.confidence == "high" and 
+  type.inbound
+  and length(body.links) < 10
+  and any(body.links,
+          // This isn't a Google Drive link
+          .href_url.domain.root_domain != "google.com"
+          and 
 
-      // Hi from Qakbot
-      any(file.explode(beta.linkanalysis(.).screenshot),
-          all([
-              "the file is not displayed correctly",
-              "use local downloaded file"
-          ], strings.icontains(..scan.ocr.raw, .))
-      )
+          // There are files downloaded
+          length(ml.link_analysis(.).files_downloaded) > 0
+          and 
+
+          // Google Drive branding
+          ml.link_analysis(.).credphish.brand.name == "GoogleDrive"
+          and ml.link_analysis(.).credphish.brand.confidence == "high"
+          and 
+
+          // Hi from Qakbot
+          any(file.explode(ml.link_analysis(.).screenshot),
+              any(["the file is not displayed correctly", "use local downloaded file"],
+                  strings.icontains(..scan.ocr.raw, .)
+              )
+          )
   )
-  // Unsolicited
   and (
-          (
-              sender.email.domain.root_domain in $free_email_providers
-              and sender.email.email not in $recipient_emails
-          )
-          or (
-              sender.email.domain.root_domain not in $free_email_providers
-              and sender.email.domain.domain not in $recipient_domains
-          )
-  ) 
+    not profile.by_sender().solicited
+    or (
+      profile.by_sender().any_messages_malicious_or_spam
+      and not profile.by_sender().any_false_positives
+    )
+  )
 tags:
-  - "HTML smuggling"
-  - "Suspicious link"
-  - "Brand impersonation"
-  - "Malware"
-  - "QakBot"
+  - "Malfam: QakBot"
+attack_types:
+  - "Malware/Ransomware"
+tactics_and_techniques:
+  - "Impersonation: Brand"
+  - "Social engineering"
+detection_methods:
+  - "Content analysis"
+  - "File analysis"
+  - "Optical Character Recognition"
+  - "URL analysis"
+  - "URL screenshot"
 id: "4b5343be-9b10-58a3-8d14-a1bae1eebc62"
